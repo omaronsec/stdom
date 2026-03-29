@@ -24,6 +24,9 @@ A fast recon tool that leverages SecurityTrails web session to enumerate all dom
 
 ```bash
 pip3 install curl_cffi
+
+# On Ubuntu/Debian if you get "externally-managed-environment" error:
+pip3 install curl_cffi --break-system-packages
 ```
 
 ---
