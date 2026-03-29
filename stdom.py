@@ -247,7 +247,7 @@ def select_ns_representatives(ns_records, target, session, build_id):
     return representatives
 
 def get_ns_count(session, build_id, ns):
-    url = f"{BASE_URL}/_next/data/{build_id}/list/ns/{ns}.json?page=1&ns={ns}"
+    url = f"{BASE_URL}/_next/data/{build_id}/list/ns/{ns}.json?ns={ns}"
     session.headers.update({"Referer": f"{BASE_URL}/list/ns/{ns}"})
     try:
         r = session.get(url, impersonate="chrome120", timeout=15, verify=False)
@@ -281,7 +281,7 @@ def scrape_all_pages(session, build_id, mode, value, tlds, label):
         total_tlds = len(tlds)
         hits = 0
         for i, tld in enumerate(tlds, 1):
-            url = f"{BASE_URL}/_next/data/{build_id}/list/email/{value}.json?page=1&search={tld}&email={value}"
+            url = f"{BASE_URL}/_next/data/{build_id}/list/email/{value}.json?email={value}&search={tld}"
             ref = f"{BASE_URL}/list/email/{value}?search={tld}"
             records, meta = fetch_page(session, url, ref)
 
@@ -304,7 +304,7 @@ def scrape_all_pages(session, build_id, mode, value, tlds, label):
                   f"{DIM}({len(all_domains)} total){RST}")
 
             for page in range(2, max_page + 1):
-                url_p = f"{BASE_URL}/_next/data/{build_id}/list/email/{value}.json?page={page}&search={tld}&email={value}"
+                url_p = f"{BASE_URL}/_next/data/{build_id}/list/email/{value}.json?email={value}&search={tld}&page={page}"
                 recs_p, meta_p = fetch_page(session, url_p, ref)
                 if recs_p:
                     h = [r["hostname"] for r in recs_p if "hostname" in r]
@@ -314,7 +314,7 @@ def scrape_all_pages(session, build_id, mode, value, tlds, label):
             time.sleep(0.35)
 
     elif mode == "ns":
-        url = f"{BASE_URL}/_next/data/{build_id}/list/ns/{value}.json?page=1&ns={value}"
+        url = f"{BASE_URL}/_next/data/{build_id}/list/ns/{value}.json?ns={value}"
         ref = f"{BASE_URL}/list/ns/{value}"
         records, meta = fetch_page(session, url, ref)
 
@@ -334,7 +334,7 @@ def scrape_all_pages(session, build_id, mode, value, tlds, label):
         all_domains.update(hostnames)
 
         for page in range(2, max_page + 1):
-            url_p = f"{BASE_URL}/_next/data/{build_id}/list/ns/{value}.json?page={page}&ns={value}"
+            url_p = f"{BASE_URL}/_next/data/{build_id}/list/ns/{value}.json?ns={value}&page={page}"
             recs_p, _ = fetch_page(session, url_p, ref)
             if recs_p:
                 all_domains.update(r["hostname"] for r in recs_p if "hostname" in r)
