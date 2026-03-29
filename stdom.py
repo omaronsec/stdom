@@ -218,7 +218,7 @@ def select_ns_representatives(ns_records, target, headers, build_id):
     section("NS Group Analysis")
 
     for root, members in groups.items():
-        rep     = members[0]
+        rep     = sorted(members)[0]  # prefer ns1 over ns2/ns3/ns4
         related = is_target_related(root, keyword)
         count   = get_ns_count(headers, build_id, rep)
         time.sleep(0.3)
@@ -299,31 +299,41 @@ def scrape_all_pages(headers, build_id, mode, value, tlds, label):
             time.sleep(0.4)
 
     elif mode == "ns":
-        url = f"{BASE_URL}/_next/data/{build_id}/list/ns/{value}.json?page=1&ns={value}"
-        ref = f"{BASE_URL}/list/ns/{value}"
-        records, meta = fetch_page(headers, url, ref)
+        total_tlds = len(tlds)
+        for i, tld in enumerate(tlds, 1):
+            url = f"{BASE_URL}/_next/data/{build_id}/list/ns/{value}.json?page=1&search={tld}&ns={value}"
+            ref = f"{BASE_URL}/list/ns/{value}?search={tld}"
+            records, meta = fetch_page(headers, url, ref)
 
-        if records is None:
-            if meta == "cloudflare":
-                err("Cloudflare blocked.")
-            return all_domains
+            if records is None:
+                if meta == "cloudflare":
+                    err(f"Cloudflare blocked on TLD {tld}. Session expired.")
+                    warn("Run from the machine used to log in to SecurityTrails.")
+                    break
+                print(f"  {DIM}[{i}/{total_tlds}]{RST} {tld:<12} error — {meta}")
+                time.sleep(1)
+                continue
 
-        if not records:
-            return all_domains
+            if not records:
+                time.sleep(0.3)
+                continue
 
-        max_page = meta.get("max_page", 1) if isinstance(meta, dict) else 1
-        total    = meta.get("total", len(records)) if isinstance(meta, dict) else len(records)
+            max_page = meta.get("max_page", 1) if isinstance(meta, dict) else 1
+            total    = meta.get("total", len(records)) if isinstance(meta, dict) else len(records)
+            hostnames = [r["hostname"] for r in records if "hostname" in r]
+            all_domains.update(hostnames)
+            print(f"  {DIM}[{i}/{total_tlds}]{RST} {tld:<12} {G}+{total}{RST} domains  "
+                  f"{DIM}({len(all_domains)} total){RST}")
 
-        info(f"{label}: {C}{total:,}{RST} domains ({max_page} pages)")
-        hostnames = [r["hostname"] for r in records if "hostname" in r]
-        all_domains.update(hostnames)
+            for page in range(2, max_page + 1):
+                url_p = f"{BASE_URL}/_next/data/{build_id}/list/ns/{value}.json?page={page}&search={tld}&ns={value}"
+                recs_p, _ = fetch_page(headers, url_p, ref)
+                if recs_p:
+                    h = [r["hostname"] for r in recs_p if "hostname" in r]
+                    all_domains.update(h)
+                    print(f"    {DIM}page {page}/{max_page} → +{len(h)}{RST}")
+                time.sleep(0.4)
 
-        for page in range(2, max_page + 1):
-            url_p = f"{BASE_URL}/_next/data/{build_id}/list/ns/{value}.json?page={page}&ns={value}"
-            recs_p, _ = fetch_page(headers, url_p, ref)
-            if recs_p:
-                all_domains.update(r["hostname"] for r in recs_p if "hostname" in r)
-            print(f"  {DIM}page {page}/{max_page} → {len(all_domains)} collected{RST}")
             time.sleep(0.4)
 
     return all_domains
