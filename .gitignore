@@ -1,0 +1,9 @@
+cookie.txt
+*.txt
+!countries_tld.txt
+__pycache__/
+*.pyc
+*.pyo
+.env
+output/
+results/
