@@ -10,7 +10,7 @@ from curl_cffi import requests
 # ─── DEFAULT TLD FILE ────────────────────────────────────────────────────────
 DEFAULT_TLDS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "countries_tld.txt")
 BASE_URL     = "https://securitytrails.com"
-SHARED_THRESHOLD = 50000  # NS returning more than this = likely shared provider
+SHARED_THRESHOLD = 50000
 
 # ─── COLORS ──────────────────────────────────────────────────────────────────
 R  = "\033[91m"
@@ -45,7 +45,7 @@ def section(title):
     print(f"{C}{'─'*55}{RST}")
 
 # ─── LOAD COOKIE FILE ────────────────────────────────────────────────────────
-def load_cookies(path):
+def load_headers(path):
     cookies = {}
     try:
         with open(path) as f:
@@ -65,36 +65,27 @@ def load_cookies(path):
         err("Cookie file must contain: cf_clearance=xxx and SecurityTrails=xxx")
         sys.exit(1)
 
-    return cookies
+    cookie_str = "; ".join(f"{k}={v}" for k, v in cookies.items())
 
-def build_cookie_header(cookies):
-    static = {
-        "securitytrails_asn_preload": "1",
-        "X-ST-Client": "web",
-    }
-    merged = {**static, **cookies}
-    return "; ".join(f"{k}={v}" for k, v in merged.items())
-
-# ─── SESSION ─────────────────────────────────────────────────────────────────
-def make_session(cookie_str):
-    s = requests.Session()
-    s.headers.update({
+    headers = {
+        "Cookie": cookie_str,
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+        "X-Nextjs-Data": "1",
         "Accept": "*/*",
-        "Accept-Language": "en-US,en-GB;q=0.9,en;q=0.8",
         "Sec-Fetch-Site": "same-origin",
         "Sec-Fetch-Mode": "cors",
         "Sec-Fetch-Dest": "empty",
-        "Cookie": cookie_str,
-    })
-    return s
+        "Accept-Language": "en-US,en-GB;q=0.9,en;q=0.8",
+    }
+    return headers
 
 # ─── BUILD ID DETECTION ──────────────────────────────────────────────────────
-def get_build_id(session):
+def get_build_id(headers):
     info("Detecting SecurityTrails build ID...")
     try:
-        r = session.get(f"{BASE_URL}/app/account", impersonate="chrome120",
-                        timeout=15, verify=False, allow_redirects=True)
+        h = {**headers, "Referer": BASE_URL}
+        r = requests.get(f"{BASE_URL}/app/account", headers=h,
+                         impersonate="chrome120", timeout=15, verify=False)
 
         if "Just a moment" in r.text or "cf-browser-verification" in r.text:
             err("Cloudflare blocked the request!")
@@ -115,11 +106,12 @@ def get_build_id(session):
         sys.exit(1)
 
 # ─── SESSION CHECK ───────────────────────────────────────────────────────────
-def check_session(session, build_id):
+def check_session(headers, build_id):
     info("Validating session...")
     try:
         url = f"{BASE_URL}/_next/data/{build_id}/domain/google.com/dns.json?domain=google.com"
-        r = session.get(url, impersonate="chrome120", timeout=15, verify=False)
+        h = {**headers, "Referer": f"{BASE_URL}/domain/google.com"}
+        r = requests.get(url, headers=h, impersonate="chrome120", timeout=15, verify=False)
 
         if "Just a moment" in r.text or "cf-browser-verification" in r.text:
             err("Cloudflare blocked — cf_clearance cookie doesn't match this machine/IP.")
@@ -127,7 +119,7 @@ def check_session(session, build_id):
             sys.exit(1)
 
         d = r.json()
-        user = d.get("pageProps", {}).get("user", {})
+        user  = d.get("pageProps", {}).get("user", {})
         email = user.get("email", "")
         plan  = user.get("packageCode", "")
         name  = user.get("name", "")
@@ -144,19 +136,18 @@ def check_session(session, build_id):
         sys.exit(1)
 
 # ─── TARGET INFO ─────────────────────────────────────────────────────────────
-def get_target_info(session, build_id, target):
+def get_target_info(headers, build_id, target):
     section(f"Target Intelligence: {target}")
     url = f"{BASE_URL}/_next/data/{build_id}/domain/{target}/dns.json?domain={target}"
-    session.headers.update({"Referer": f"{BASE_URL}/domain/{target}"})
+    h = {**headers, "Referer": f"{BASE_URL}/domain/{target}"}
 
     try:
-        r = session.get(url, impersonate="chrome120", timeout=15, verify=False)
+        r = requests.get(url, headers=h, impersonate="chrome120", timeout=15, verify=False)
         d = r.json()
         dns = d["pageProps"]["dnsData"]["data"]
 
         result = {"soa_emails": [], "ns_records": [], "raw": dns}
 
-        # SOA
         soa_vals = dns.get("current_dns", {}).get("soa", {}).get("values", [])
         for v in soa_vals:
             email = v.get("email", "")
@@ -164,7 +155,6 @@ def get_target_info(session, build_id, target):
                 result["soa_emails"].append(email)
                 found(f"SOA Email: {email}")
 
-        # NS
         ns_vals = dns.get("current_dns", {}).get("ns", {}).get("values", [])
         for v in ns_vals:
             ns = v.get("nameserver", "")
@@ -176,17 +166,16 @@ def get_target_info(session, build_id, target):
             for ns in result["ns_records"]:
                 print(f"    {DIM}→{RST} {ns}")
 
-        # Extra info
-        a_vals = dns.get("current_dns", {}).get("a", {}).get("values", [])
+        a_vals  = dns.get("current_dns", {}).get("a",  {}).get("values", [])
         mx_vals = dns.get("current_dns", {}).get("mx", {}).get("values", [])
         subdomain_count = d["pageProps"].get("subdomainsCount", 0)
-        is_estimate = d["pageProps"].get("isTotalEstimate", False)
+        is_estimate     = d["pageProps"].get("isTotalEstimate", False)
 
         if a_vals:
-            ips = [v.get("ip","") for v in a_vals]
+            ips = [v.get("ip", "") for v in a_vals]
             info(f"A Records: {', '.join(ips)}")
         if mx_vals:
-            mxs = [v.get("hostname","") for v in mx_vals]
+            mxs = [v.get("hostname", "") for v in mx_vals]
             info(f"MX Records: {', '.join(mxs[:3])}")
 
         est = "~" if is_estimate else ""
@@ -206,25 +195,32 @@ def get_ns_root(ns):
 def is_target_related(ns_root, target_keyword):
     return target_keyword.lower() in ns_root.lower()
 
-def select_ns_representatives(ns_records, target, session, build_id):
-    """Group NS by root domain, pick one per group, classify as owned vs shared."""
+def get_ns_count(headers, build_id, ns):
+    url = f"{BASE_URL}/_next/data/{build_id}/list/ns/{ns}.json?page=1&ns={ns}"
+    h = {**headers, "Referer": f"{BASE_URL}/list/ns/{ns}"}
+    try:
+        r = requests.get(url, headers=h, impersonate="chrome120", timeout=15, verify=False)
+        if "Just a moment" in r.text:
+            return "err"
+        d = r.json()
+        return d["pageProps"]["serverResponse"]["data"].get("total", 0)
+    except:
+        return "err"
+
+def select_ns_representatives(ns_records, target, headers, build_id):
     keyword = target.split(".")[0]
     groups = {}
     for ns in ns_records:
         root = get_ns_root(ns)
-        if root not in groups:
-            groups[root] = []
-        groups[root].append(ns)
+        groups.setdefault(root, []).append(ns)
 
     representatives = []
     section("NS Group Analysis")
 
     for root, members in groups.items():
-        rep = members[0]  # pick first from group
+        rep     = members[0]
         related = is_target_related(root, keyword)
-
-        # Quick count check
-        count = get_ns_count(session, build_id, rep)
+        count   = get_ns_count(headers, build_id, rep)
         time.sleep(0.3)
 
         if count == "err":
@@ -246,84 +242,66 @@ def select_ns_representatives(ns_records, target, session, build_id):
 
     return representatives
 
-def get_ns_count(session, build_id, ns):
-    url = f"{BASE_URL}/_next/data/{build_id}/list/ns/{ns}.json?ns={ns}"
-    session.headers.update({"Referer": f"{BASE_URL}/list/ns/{ns}"})
+# ─── FETCH PAGE ──────────────────────────────────────────────────────────────
+def fetch_page(headers, url, referer):
+    h = {**headers, "Referer": referer}
     try:
-        r = session.get(url, impersonate="chrome120", timeout=15, verify=False)
-        if "Just a moment" in r.text:
-            return "err"
+        r = requests.get(url, headers=h, impersonate="chrome120", timeout=15, verify=False)
+        if "Just a moment" in r.text or "cf-browser-verification" in r.text:
+            return None, "cloudflare"
         d = r.json()
-        return d["pageProps"]["serverResponse"]["data"].get("total", 0)
-    except:
-        return "err"
+        records = d["pageProps"]["serverResponse"]["data"]["records"]
+        meta    = d["pageProps"]["serverResponse"]["data"]["meta"]
+        return records, meta
+    except Exception as e:
+        return None, str(e)
 
-# ─── FETCH PAGES ─────────────────────────────────────────────────────────────
-def fetch_page(session, url, referer):
-    session.headers.update({"X-Nextjs-Data": "1", "Referer": referer})
-    for attempt in range(4):
-        try:
-            r = session.get(url, impersonate="chrome120", timeout=15, verify=False)
-            if r.status_code == 429:
-                wait = 10 * (attempt + 1)
-                warn(f"Rate limited (429) — sleeping {wait}s then retrying...")
-                time.sleep(wait)
-                continue
-            if "Just a moment" in r.text or "cf-browser-verification" in r.text:
-                return None, "cloudflare"
-            d = r.json()
-            records = d["pageProps"]["serverResponse"]["data"]["records"]
-            meta    = d["pageProps"]["serverResponse"]["data"]["meta"]
-            return records, meta
-        except Exception as e:
-            return None, str(e)
-    return None, "429"
-
-def scrape_all_pages(session, build_id, mode, value, tlds, label):
-    """Scrape all pages for a given value (SOA email or NS)."""
+# ─── SCRAPE ALL PAGES ────────────────────────────────────────────────────────
+def scrape_all_pages(headers, build_id, mode, value, tlds, label):
     all_domains = set()
 
     if mode == "soa":
-        # Iterate all TLDs
         total_tlds = len(tlds)
-        hits = 0
         for i, tld in enumerate(tlds, 1):
-            url = f"{BASE_URL}/_next/data/{build_id}/list/email/{value}.json?email={value}&search={tld}"
+            url = f"{BASE_URL}/_next/data/{build_id}/list/email/{value}.json?page=1&search={tld}&email={value}"
             ref = f"{BASE_URL}/list/email/{value}?search={tld}"
-            records, meta = fetch_page(session, url, ref)
+            records, meta = fetch_page(headers, url, ref)
 
             if records is None:
                 if meta == "cloudflare":
                     err(f"Cloudflare blocked on TLD {tld}. Session expired.")
                     warn("Run from the machine used to log in to SecurityTrails.")
                     break
+                print(f"  {DIM}[{i}/{total_tlds}]{RST} {tld:<12} error — {meta}")
+                time.sleep(1)
                 continue
 
             if not records:
+                time.sleep(0.3)
                 continue
 
             max_page = meta.get("max_page", 1) if isinstance(meta, dict) else 1
             total    = meta.get("total", len(records)) if isinstance(meta, dict) else len(records)
             hostnames = [r["hostname"] for r in records if "hostname" in r]
             all_domains.update(hostnames)
-            hits += total
             print(f"  {DIM}[{i}/{total_tlds}]{RST} {tld:<12} {G}+{total}{RST} domains  "
                   f"{DIM}({len(all_domains)} total){RST}")
 
             for page in range(2, max_page + 1):
                 url_p = f"{BASE_URL}/_next/data/{build_id}/list/email/{value}.json?page={page}&search={tld}&email={value}"
-                recs_p, meta_p = fetch_page(session, url_p, ref)
+                recs_p, _ = fetch_page(headers, url_p, ref)
                 if recs_p:
                     h = [r["hostname"] for r in recs_p if "hostname" in r]
                     all_domains.update(h)
+                    print(f"    {DIM}page {page}/{max_page} → +{len(h)}{RST}")
                 time.sleep(0.4)
 
-            time.sleep(1)
+            time.sleep(0.4)
 
     elif mode == "ns":
-        url = f"{BASE_URL}/_next/data/{build_id}/list/ns/{value}.json?ns={value}"
+        url = f"{BASE_URL}/_next/data/{build_id}/list/ns/{value}.json?page=1&ns={value}"
         ref = f"{BASE_URL}/list/ns/{value}"
-        records, meta = fetch_page(session, url, ref)
+        records, meta = fetch_page(headers, url, ref)
 
         if records is None:
             if meta == "cloudflare":
@@ -342,7 +320,7 @@ def scrape_all_pages(session, build_id, mode, value, tlds, label):
 
         for page in range(2, max_page + 1):
             url_p = f"{BASE_URL}/_next/data/{build_id}/list/ns/{value}.json?page={page}&ns={value}"
-            recs_p, _ = fetch_page(session, url_p, ref)
+            recs_p, _ = fetch_page(headers, url_p, ref)
             if recs_p:
                 all_domains.update(r["hostname"] for r in recs_p if "hostname" in r)
             print(f"  {DIM}page {page}/{max_page} → {len(all_domains)} collected{RST}")
@@ -358,21 +336,20 @@ def main():
         description="SecurityTrails Domain Recon Tool",
         formatter_class=argparse.RawTextHelpFormatter
     )
-    parser.add_argument("-t",      required=True,  metavar="domain",      help="Target domain (e.g. abbvie.com)")
-    parser.add_argument("-s",      required=True,  metavar="cookie.txt",  help="Cookie file with cf_clearance and SecurityTrails")
-    parser.add_argument("-m",      required=True,  metavar="mode",        help="Mode: soa | ns | all",
-                        choices=["soa","ns","all"])
-    parser.add_argument("-o",      required=True,  metavar="output.txt",  help="Output file path")
-    parser.add_argument("-tlds",   required=False, metavar="tlds.txt",    help="TLD list file (default: countries_tld.txt)")
+    parser.add_argument("-t",    required=True,  metavar="domain",     help="Target domain (e.g. abbvie.com)")
+    parser.add_argument("-s",    required=True,  metavar="cookie.txt", help="Cookie file with cf_clearance and SecurityTrails")
+    parser.add_argument("-m",    required=True,  metavar="mode",       help="Mode: soa | ns | all",
+                        choices=["soa", "ns", "all"])
+    parser.add_argument("-o",    required=True,  metavar="output.txt", help="Output file path")
+    parser.add_argument("-tlds", required=False, metavar="tlds.txt",   help="TLD list file (default: countries_tld.txt)")
 
     args = parser.parse_args()
 
-    target   = args.t.lower().strip().lstrip(".")
-    out_file = args.o
-    mode     = args.m
+    target    = args.t.lower().strip().lstrip(".")
+    out_file  = args.o
+    mode      = args.m
     tlds_file = args.tlds if args.tlds else DEFAULT_TLDS
 
-    # Load TLDs
     if not os.path.exists(tlds_file):
         err(f"TLD file not found: {tlds_file}")
         sys.exit(1)
@@ -380,23 +357,13 @@ def main():
         tlds = [l.strip() for l in f if l.strip() and l.strip().startswith(".")]
     info(f"Loaded {len(tlds)} TLDs from {tlds_file}")
 
-    # Load cookies
-    cookies    = load_cookies(args.s)
-    cookie_str = build_cookie_header(cookies)
-    session    = make_session(cookie_str)
-
-    # Get build ID
-    build_id = get_build_id(session)
-
-    # Validate session
-    check_session(session, build_id)
-
-    # Get target DNS info
-    dns_info = get_target_info(session, build_id, target)
+    headers  = load_headers(args.s)
+    build_id = get_build_id(headers)
+    check_session(headers, build_id)
+    dns_info = get_target_info(headers, build_id, target)
 
     all_domains = set()
 
-    # ── SOA MODE ──────────────────────────────────────────────────────────────
     if mode in ["soa", "all"]:
         section("SOA Email Search")
         if not dns_info["soa_emails"]:
@@ -406,30 +373,25 @@ def main():
                 info(f"Searching by SOA email: {C}{email}{RST}")
                 info(f"Iterating {len(tlds)} TLDs...")
                 print()
-                domains = scrape_all_pages(session, build_id, "soa", email, tlds, email)
+                domains = scrape_all_pages(headers, build_id, "soa", email, tlds, email)
                 ok(f"SOA [{email}]: {G}{len(domains):,}{RST} unique domains found")
                 all_domains.update(domains)
 
-    # ── NS MODE ───────────────────────────────────────────────────────────────
     if mode in ["ns", "all"]:
         section("NS Record Search")
         if not dns_info["ns_records"]:
             warn("No NS records found for this target.")
         else:
-            reps = select_ns_representatives(
-                dns_info["ns_records"], target, session, build_id)
-
+            reps = select_ns_representatives(dns_info["ns_records"], target, headers, build_id)
             print()
             for ns, count, root in reps:
                 info(f"Searching by NS: {C}{ns}{RST}")
-                domains = scrape_all_pages(session, build_id, "ns", ns, tlds, ns)
+                domains = scrape_all_pages(headers, build_id, "ns", ns, tlds, ns)
                 ok(f"NS [{ns}]: {G}{len(domains):,}{RST} unique domains found")
                 all_domains.update(domains)
 
-    # ── FINAL SAVE ────────────────────────────────────────────────────────────
     section("Results")
 
-    # Load existing file if exists (merge)
     existing = set()
     if os.path.exists(out_file):
         with open(out_file) as f:
