@@ -159,11 +159,9 @@
 .ms
 .ma
 .mz
-.mm
 .na
 .nr
 .np
-.nl
 .nc
 .nz
 .ni
@@ -171,7 +169,6 @@
 .ng
 .nu
 .nf
-.nc
 .tr
 .kp
 .mp
@@ -179,7 +176,6 @@
 .om
 .pk
 .pw
-.ps
 .pa
 .pg
 .py
@@ -194,17 +190,11 @@
 .ru
 .rw
 .re
-.bq
-.an
 .bl
-.gp
-.fr
 .sh
 .kn
 .lc
 .mf
-.gp
-.fr
 .pm
 .vc
 .ws
@@ -216,15 +206,10 @@
 .sc
 .sl
 .sg
-.bq
-.an
-.nl
 .sx
-.an
 .sk
 .si
 .sb
-.so
 .so
 .za
 .gs
@@ -248,7 +233,6 @@
 .to
 .tt
 .tn
-.tr
 .tm
 .tc
 .tv
@@ -266,7 +250,6 @@
 .vn
 .wf
 .eh
-.ma
 .ye
 .zm
 .zw
@@ -275,8 +258,6 @@
 .org
 .info
 .biz
-.io
-.co
 .app
 .dev
 .online
@@ -299,7 +280,6 @@
 .international
 .world
 .holding
-.eu
 .asia
 .lat
 .africa
@@ -307,7 +287,6 @@
 .beauty
 .clicic
 .pharmacy
-.med
 .life
 .live
 .today
