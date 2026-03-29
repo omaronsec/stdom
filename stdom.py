@@ -304,7 +304,7 @@ def scrape_all_pages(session, build_id, mode, value, tlds, label):
                   f"{DIM}({len(all_domains)} total){RST}")
 
             for page in range(2, max_page + 1):
-                url_p = f"{BASE_URL}/_next/data/{build_id}/list/email/{value}.json?email={value}&search={tld}&page={page}"
+                url_p = f"{BASE_URL}/_next/data/{build_id}/list/email/{value}.json?page={page}&search={tld}&email={value}"
                 recs_p, meta_p = fetch_page(session, url_p, ref)
                 if recs_p:
                     h = [r["hostname"] for r in recs_p if "hostname" in r]
@@ -334,7 +334,7 @@ def scrape_all_pages(session, build_id, mode, value, tlds, label):
         all_domains.update(hostnames)
 
         for page in range(2, max_page + 1):
-            url_p = f"{BASE_URL}/_next/data/{build_id}/list/ns/{value}.json?ns={value}&page={page}"
+            url_p = f"{BASE_URL}/_next/data/{build_id}/list/ns/{value}.json?page={page}&ns={value}"
             recs_p, _ = fetch_page(session, url_p, ref)
             if recs_p:
                 all_domains.update(r["hostname"] for r in recs_p if "hostname" in r)
