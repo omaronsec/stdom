@@ -261,16 +261,23 @@ def get_ns_count(session, build_id, ns):
 # ─── FETCH PAGES ─────────────────────────────────────────────────────────────
 def fetch_page(session, url, referer):
     session.headers.update({"X-Nextjs-Data": "1", "Referer": referer})
-    try:
-        r = session.get(url, impersonate="chrome120", timeout=15, verify=False)
-        if "Just a moment" in r.text or "cf-browser-verification" in r.text:
-            return None, "cloudflare"
-        d = r.json()
-        records = d["pageProps"]["serverResponse"]["data"]["records"]
-        meta    = d["pageProps"]["serverResponse"]["data"]["meta"]
-        return records, meta
-    except Exception as e:
-        return None, str(e)
+    for attempt in range(4):
+        try:
+            r = session.get(url, impersonate="chrome120", timeout=15, verify=False)
+            if r.status_code == 429:
+                wait = 10 * (attempt + 1)
+                warn(f"Rate limited (429) — sleeping {wait}s then retrying...")
+                time.sleep(wait)
+                continue
+            if "Just a moment" in r.text or "cf-browser-verification" in r.text:
+                return None, "cloudflare"
+            d = r.json()
+            records = d["pageProps"]["serverResponse"]["data"]["records"]
+            meta    = d["pageProps"]["serverResponse"]["data"]["meta"]
+            return records, meta
+        except Exception as e:
+            return None, str(e)
+    return None, "429"
 
 def scrape_all_pages(session, build_id, mode, value, tlds, label):
     """Scrape all pages for a given value (SOA email or NS)."""
@@ -311,7 +318,7 @@ def scrape_all_pages(session, build_id, mode, value, tlds, label):
                     all_domains.update(h)
                 time.sleep(0.4)
 
-            time.sleep(0.35)
+            time.sleep(1)
 
     elif mode == "ns":
         url = f"{BASE_URL}/_next/data/{build_id}/list/ns/{value}.json?ns={value}"
